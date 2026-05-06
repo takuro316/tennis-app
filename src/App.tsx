@@ -318,8 +318,10 @@ function App() {
   const draggingIdRef = useRef<PlayerId | null>(null)
   const frameRef = useRef<number | null>(null)
   const pendingPointRef = useRef<Point | null>(null)
-  const dragCommitPointRef = useRef<Point | null>(null)
-  const [players, setPlayers] =
+  const livePlayersRef = useRef<Record<PlayerId, Player>>(initialPlayers)
+  const [livePlayers, setLivePlayers] =
+    useState<Record<PlayerId, Player>>(initialPlayers)
+  const [committedPlayers, setCommittedPlayers] =
     useState<Record<PlayerId, Player>>(initialPlayers)
   const [draggingId, setDraggingId] = useState<PlayerId | null>(null)
   const [frontSide, setFrontSide] = useState<FrontSide>('right')
@@ -328,9 +330,7 @@ function App() {
   const [isLightMode, setIsLightMode] = useState(() => isIpadLike)
   const [showLabels, setShowLabels] = useState(false)
   const isDragging = draggingId !== null
-  const isDraggingHitter = draggingId !== null && isHitterPlayer(draggingId)
   const effectiveShowLabels = showLabels && !isLightMode
-  const territoryIsLightMode = isLightMode || isDraggingHitter
   const svgClassName = useMemo(
     () => {
       const classes = ['court-svg']
@@ -354,8 +354,8 @@ function App() {
         players: {
           A: initialPlayers.A,
           B: initialPlayers.B,
-          C: players.C,
-          D: players.D,
+          C: committedPlayers.C,
+          D: committedPlayers.D,
         },
         hitterId,
         frontSide,
@@ -363,10 +363,10 @@ function App() {
     [
       frontSide,
       hitterId,
-      players.C.x,
-      players.C.y,
-      players.D.x,
-      players.D.y,
+      committedPlayers.C.x,
+      committedPlayers.C.y,
+      committedPlayers.D.x,
+      committedPlayers.D.y,
     ],
   )
   const visibleLegendItems = useMemo(() => legendItems, [])
@@ -403,6 +403,20 @@ function App() {
     }
   }, [])
 
+  const setLivePlayerPosition = useCallback((id: PlayerId, position: Point) => {
+    const current = livePlayersRef.current
+    const nextPlayers = {
+      ...current,
+      [id]: {
+        ...current[id],
+        ...position,
+      },
+    }
+
+    livePlayersRef.current = nextPlayers
+    setLivePlayers(nextPlayers)
+  }, [])
+
   const updatePlayerPosition = useCallback((position: Point) => {
     const id = draggingIdRef.current
 
@@ -415,20 +429,18 @@ function App() {
       y: clamp(position.y, 24, 1126),
     }
 
-    if (!isHitterPlayer(id)) {
-      dragCommitPointRef.current = nextPosition
+    if (isLightMode) {
       movePlayerElement(id, nextPosition)
+      setLivePlayerPosition(id, nextPosition)
       return
     }
 
-    setPlayers((current) => ({
-      ...current,
-      [id]: {
-        ...current[id],
-        ...nextPosition,
-      },
-    }))
-  }, [movePlayerElement])
+    setLivePlayerPosition(id, nextPosition)
+
+    if (isHitterPlayer(id)) {
+      setCommittedPlayers(livePlayersRef.current)
+    }
+  }, [isLightMode, movePlayerElement, setLivePlayerPosition])
 
   const handlePlayerPointerDown = useCallback((
     event: PointerEvent<SVGGElement>,
@@ -437,7 +449,6 @@ function App() {
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
     draggingIdRef.current = id
-    dragCommitPointRef.current = null
     setDraggingId(id)
   }, [])
 
@@ -475,19 +486,7 @@ function App() {
       pendingPointRef.current = null
     }
 
-    if (id && !isHitterPlayer(id) && dragCommitPointRef.current) {
-      const nextPosition = dragCommitPointRef.current
-
-      setPlayers((current) => ({
-        ...current,
-        [id]: {
-          ...current[id],
-          ...nextPosition,
-        },
-      }))
-    }
-
-    dragCommitPointRef.current = null
+    setCommittedPlayers(livePlayersRef.current)
     draggingIdRef.current = null
     setDraggingId(null)
   }, [updatePlayerPosition])
@@ -499,9 +498,10 @@ function App() {
     }
 
     pendingPointRef.current = null
-    dragCommitPointRef.current = null
     draggingIdRef.current = null
-    setPlayers(initialPlayers)
+    livePlayersRef.current = initialPlayers
+    setLivePlayers(initialPlayers)
+    setCommittedPlayers(initialPlayers)
     setDraggingId(null)
     setHitterId('D')
   }, [])
@@ -535,12 +535,12 @@ function App() {
 
             <TerritoryLayer
               territoryData={territoryData}
-              isLightMode={territoryIsLightMode}
+              isLightMode={isLightMode}
               showLabels={effectiveShowLabels}
             />
 
             {playerOrder.map((id) => {
-              const player = players[id]
+              const player = livePlayers[id]
               const isHitter = hitterId === id
 
               return (
