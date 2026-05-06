@@ -91,6 +91,15 @@ p {
   -webkit-user-select: none;
 }
 
+.court-svg.is-light-mode,
+.court-svg.is-light-mode * {
+  animation: none;
+  backdrop-filter: none;
+  filter: none;
+  text-shadow: none;
+  transition: none;
+}
+
 .canvas-bg {
   fill: #e7f3eb;
 }
@@ -112,6 +121,7 @@ p {
 }
 
 .territory-polygon {
+  pointer-events: none;
   stroke-linejoin: round;
 }
 
@@ -133,6 +143,7 @@ p {
 
 .territory-boundary {
   fill: none;
+  pointer-events: none;
   stroke: #17201d;
   stroke-dasharray: 10 10;
   stroke-linecap: round;
@@ -166,6 +177,12 @@ p {
   stroke-dasharray: none;
 }
 
+.court-svg.is-dragging .territory-label,
+.court-svg.is-light-mode .territory-label,
+.court-svg.is-light-mode .player-role {
+  display: none;
+}
+
 .territory-layer.is-light .territory-boundary {
   stroke-linecap: butt;
   opacity: 0.8;
@@ -175,8 +192,13 @@ p {
   display: none;
 }
 
+.territory-layer {
+  pointer-events: none;
+}
+
 .territory-layer .hitter-origin {
   fill: #111827;
+  pointer-events: none;
   stroke: #fff;
   stroke-width: 3;
 }
@@ -206,9 +228,14 @@ p {
 
 .player {
   cursor: grab;
+  pointer-events: auto;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.player circle {
+  pointer-events: auto;
 }
 
 .player.is-dragging {

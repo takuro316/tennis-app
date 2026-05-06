@@ -1,17 +1,9 @@
 import { memo, useMemo } from 'react'
-import { calculateTerritories, toPolygonPoints } from '../utils/territory'
-import type { Court, PlayerInput, TerritoryShape } from '../utils/territory'
+import { toPolygonPoints } from '../utils/territory'
+import type { BoundaryLine, TerritoryResult, TerritoryShape } from '../utils/territory'
 
 type TerritoryLayerProps = {
-  court: Court
-  players: {
-    A: PlayerInput
-    B: PlayerInput
-    C: PlayerInput
-    D: PlayerInput
-  }
-  frontSide: 'right' | 'left'
-  hitterId: 'C' | 'D'
+  territoryData: TerritoryResult
   isLightMode: boolean
   showLabels: boolean
 }
@@ -21,51 +13,50 @@ const TerritoryPolygon = memo(function TerritoryPolygon({
 }: {
   shape: TerritoryShape
 }) {
+  const points = useMemo(() => toPolygonPoints(shape.points), [shape.points])
+
   return (
     <polygon
       className={`territory-polygon ${shape.id}`}
-      points={toPolygonPoints(shape.points)}
+      points={points}
       fill={shape.color}
       opacity={shape.opacity}
     />
   )
 })
 
+const BoundaryPolyline = memo(function BoundaryPolyline({
+  line,
+}: {
+  line: BoundaryLine
+}) {
+  const points = useMemo(() => toPolygonPoints(line.points), [line.points])
+
+  return (
+    <polyline
+      className={`territory-boundary ${line.id}`}
+      points={points}
+    />
+  )
+})
+
 export const TerritoryLayer = memo(function TerritoryLayer({
-  court,
-  players,
-  frontSide,
-  hitterId,
+  territoryData,
   isLightMode,
   showLabels,
 }: TerritoryLayerProps) {
-  const territories = useMemo(
-    () =>
-      calculateTerritories({
-        court,
-        players,
-        hitterId,
-        frontSide,
-      }),
-    [court, frontSide, hitterId, players],
-  )
-
   return (
     <g className={`territory-layer ${isLightMode ? 'is-light' : ''}`}>
-      <TerritoryPolygon shape={territories.shapes.returnable} />
-      <TerritoryPolygon shape={territories.shapes.frontTerritory} />
-      <TerritoryPolygon shape={territories.shapes.backTerritory} />
+      <TerritoryPolygon shape={territoryData.shapes.returnable} />
+      <TerritoryPolygon shape={territoryData.shapes.frontTerritory} />
+      <TerritoryPolygon shape={territoryData.shapes.backTerritory} />
 
-      {territories.boundaryLines.map((line) => (
-        <polyline
-          key={line.id}
-          className={`territory-boundary ${line.id}`}
-          points={toPolygonPoints(line.points)}
-        />
+      {territoryData.boundaryLines.map((line) => (
+        <BoundaryPolyline key={line.id} line={line} />
       ))}
 
       {showLabels &&
-        territories.labels.map((label) => (
+        territoryData.labels.map((label) => (
           <text
             key={label.id}
             className={`territory-label ${label.id}`}
@@ -78,8 +69,8 @@ export const TerritoryLayer = memo(function TerritoryLayer({
 
       <circle
         className="hitter-origin"
-        cx={territories.hitter.x}
-        cy={territories.hitter.y}
+        cx={territoryData.hitter.x}
+        cy={territoryData.hitter.y}
         r="7"
       />
     </g>

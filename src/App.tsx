@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
 import { TerritoryLayer } from './components/TerritoryLayer'
+import { calculateTerritories } from './utils/territory'
 import type { Court, FrontSide, Point } from './utils/territory'
 import './App.css'
 
@@ -106,6 +107,21 @@ function getSvgPoint(svg: SVGSVGElement, event: PointerEvent<SVGElement>): Point
   return { x: transformed.x, y: transformed.y }
 }
 
+function isHitterPlayer(id: PlayerId): id is HitterId {
+  return id === 'C' || id === 'D'
+}
+
+function isLikelyIpad() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  const ua = window.navigator.userAgent
+  const touchMac = ua.includes('Macintosh') && window.navigator.maxTouchPoints > 1
+
+  return /iPad/.test(ua) || touchMac || window.innerWidth <= 1024
+}
+
 type CourtSurfaceProps = {
   isLightMode: boolean
 }
@@ -113,6 +129,61 @@ type CourtSurfaceProps = {
 const CourtSurface = memo(function CourtSurface({
   isLightMode,
 }: CourtSurfaceProps) {
+  const courtLines = useMemo(
+    () => [
+      {
+        id: 'center',
+        x1: court.x,
+        y1: court.centerY,
+        x2: court.x + court.width,
+        y2: court.centerY,
+      },
+      {
+        id: 'upper-service',
+        x1: court.x,
+        y1: upperServiceLineY,
+        x2: court.x + court.width,
+        y2: upperServiceLineY,
+      },
+      {
+        id: 'lower-service',
+        x1: court.x,
+        y1: lowerServiceLineY,
+        x2: court.x + court.width,
+        y2: lowerServiceLineY,
+      },
+      {
+        id: 'upper-center',
+        x1: court.x + court.width / 2,
+        y1: upperServiceLineY,
+        x2: court.x + court.width / 2,
+        y2: court.centerY,
+      },
+      {
+        id: 'lower-center',
+        x1: court.x + court.width / 2,
+        y1: court.centerY,
+        x2: court.x + court.width / 2,
+        y2: lowerServiceLineY,
+      },
+      {
+        id: 'left-alley',
+        x1: court.x + 65,
+        y1: court.y,
+        x2: court.x + 65,
+        y2: court.y + court.height,
+      },
+      {
+        id: 'right-alley',
+        x1: court.x + court.width - 65,
+        y1: court.y,
+        x2: court.x + court.width - 65,
+        y2: court.y + court.height,
+      },
+    ],
+    [],
+  )
+
   return (
     <>
       {!isLightMode && (
@@ -154,48 +225,9 @@ const CourtSurface = memo(function CourtSurface({
           width={court.width}
           height={court.height}
         />
-        <line
-          x1={court.x}
-          y1={court.centerY}
-          x2={court.x + court.width}
-          y2={court.centerY}
-        />
-        <line
-          x1={court.x}
-          y1={upperServiceLineY}
-          x2={court.x + court.width}
-          y2={upperServiceLineY}
-        />
-        <line
-          x1={court.x}
-          y1={lowerServiceLineY}
-          x2={court.x + court.width}
-          y2={lowerServiceLineY}
-        />
-        <line
-          x1={court.x + court.width / 2}
-          y1={upperServiceLineY}
-          x2={court.x + court.width / 2}
-          y2={court.centerY}
-        />
-        <line
-          x1={court.x + court.width / 2}
-          y1={court.centerY}
-          x2={court.x + court.width / 2}
-          y2={lowerServiceLineY}
-        />
-        <line
-          x1={court.x + 65}
-          y1={court.y}
-          x2={court.x + 65}
-          y2={court.y + court.height}
-        />
-        <line
-          x1={court.x + court.width - 65}
-          y1={court.y}
-          x2={court.x + court.width - 65}
-          y2={court.y + court.height}
-        />
+        {courtLines.map((line) => (
+          <line key={line.id} {...line} />
+        ))}
       </g>
 
       <g className="net">
@@ -221,6 +253,7 @@ type PlayerMarkerProps = {
   isHitter: boolean
   showLabels: boolean
   onPointerDown: (event: PointerEvent<SVGGElement>, id: PlayerId) => void
+  onElement: (id: PlayerId, element: SVGGElement | null) => void
 }
 
 const PlayerMarker = memo(function PlayerMarker({
@@ -229,9 +262,16 @@ const PlayerMarker = memo(function PlayerMarker({
   isHitter,
   showLabels,
   onPointerDown,
+  onElement,
 }: PlayerMarkerProps) {
+  const handleElement = useCallback(
+    (element: SVGGElement | null) => onElement(player.id, element),
+    [onElement, player.id],
+  )
+
   return (
     <g
+      ref={handleElement}
       className={`player ${isDragging ? 'is-dragging' : ''}`}
       transform={`translate(${player.x} ${player.y})`}
       onPointerDown={(event) => onPointerDown(event, player.id)}
@@ -251,25 +291,88 @@ const PlayerMarker = memo(function PlayerMarker({
       )}
     </g>
   )
-})
+}, arePlayerMarkerPropsEqual)
+
+function arePlayerMarkerPropsEqual(
+  previous: PlayerMarkerProps,
+  next: PlayerMarkerProps,
+) {
+  return (
+    previous.player === next.player &&
+    previous.isDragging === next.isDragging &&
+    previous.isHitter === next.isHitter &&
+    previous.showLabels === next.showLabels &&
+    previous.onPointerDown === next.onPointerDown &&
+    previous.onElement === next.onElement
+  )
+}
 
 function App() {
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const playerElementRefs = useRef<Record<PlayerId, SVGGElement | null>>({
+    A: null,
+    B: null,
+    C: null,
+    D: null,
+  })
   const draggingIdRef = useRef<PlayerId | null>(null)
   const frameRef = useRef<number | null>(null)
   const pendingPointRef = useRef<Point | null>(null)
+  const dragCommitPointRef = useRef<Point | null>(null)
   const [players, setPlayers] =
     useState<Record<PlayerId, Player>>(initialPlayers)
   const [draggingId, setDraggingId] = useState<PlayerId | null>(null)
   const [frontSide, setFrontSide] = useState<FrontSide>('right')
   const [hitterId, setHitterId] = useState<HitterId>('D')
-  const [isLightMode, setIsLightMode] = useState(true)
+  const isIpadLike = useMemo(() => isLikelyIpad(), [])
+  const [isLightMode, setIsLightMode] = useState(() => isIpadLike)
   const [showLabels, setShowLabels] = useState(false)
   const isDragging = draggingId !== null
-  const effectiveShowLabels = showLabels && !isLightMode && !isDragging
+  const isDraggingHitter = draggingId !== null && isHitterPlayer(draggingId)
+  const effectiveShowLabels = showLabels && !isLightMode
+  const territoryIsLightMode = isLightMode || isDraggingHitter
   const svgClassName = useMemo(
-    () => `court-svg ${isLightMode ? 'is-light-mode' : ''}`,
-    [isLightMode],
+    () => {
+      const classes = ['court-svg']
+
+      if (isLightMode) {
+        classes.push('is-light-mode')
+      }
+
+      if (isDragging) {
+        classes.push('is-dragging')
+      }
+
+      return classes.join(' ')
+    },
+    [isDragging, isLightMode],
+  )
+  const territoryData = useMemo(
+    () =>
+      calculateTerritories({
+        court,
+        players: {
+          A: initialPlayers.A,
+          B: initialPlayers.B,
+          C: players.C,
+          D: players.D,
+        },
+        hitterId,
+        frontSide,
+      }),
+    [
+      frontSide,
+      hitterId,
+      players.C.x,
+      players.C.y,
+      players.D.x,
+      players.D.y,
+    ],
+  )
+  const visibleLegendItems = useMemo(() => legendItems, [])
+  const playerList = useMemo(
+    () => playerOrder.map((id) => initialPlayers[id]),
+    [],
   )
 
   useEffect(() => {
@@ -285,6 +388,21 @@ function App() {
     [],
   )
 
+  const setPlayerElement = useCallback((
+    id: PlayerId,
+    element: SVGGElement | null,
+  ) => {
+    playerElementRefs.current[id] = element
+  }, [])
+
+  const movePlayerElement = useCallback((id: PlayerId, position: Point) => {
+    const element = playerElementRefs.current[id]
+
+    if (element) {
+      element.setAttribute('transform', `translate(${position.x} ${position.y})`)
+    }
+  }, [])
+
   const updatePlayerPosition = useCallback((position: Point) => {
     const id = draggingIdRef.current
 
@@ -292,15 +410,25 @@ function App() {
       return
     }
 
+    const nextPosition = {
+      x: clamp(position.x, 24, 736),
+      y: clamp(position.y, 24, 1126),
+    }
+
+    if (!isHitterPlayer(id)) {
+      dragCommitPointRef.current = nextPosition
+      movePlayerElement(id, nextPosition)
+      return
+    }
+
     setPlayers((current) => ({
       ...current,
       [id]: {
         ...current[id],
-        x: clamp(position.x, 24, 736),
-        y: clamp(position.y, 24, 1126),
+        ...nextPosition,
       },
     }))
-  }, [])
+  }, [movePlayerElement])
 
   const handlePlayerPointerDown = useCallback((
     event: PointerEvent<SVGGElement>,
@@ -309,6 +437,7 @@ function App() {
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
     draggingIdRef.current = id
+    dragCommitPointRef.current = null
     setDraggingId(id)
   }, [])
 
@@ -335,11 +464,30 @@ function App() {
   }, [updatePlayerPosition])
 
   const stopDragging = useCallback(() => {
+    const id = draggingIdRef.current
+
+    if (!id) {
+      return
+    }
+
     if (pendingPointRef.current) {
       updatePlayerPosition(pendingPointRef.current)
       pendingPointRef.current = null
     }
 
+    if (id && !isHitterPlayer(id) && dragCommitPointRef.current) {
+      const nextPosition = dragCommitPointRef.current
+
+      setPlayers((current) => ({
+        ...current,
+        [id]: {
+          ...current[id],
+          ...nextPosition,
+        },
+      }))
+    }
+
+    dragCommitPointRef.current = null
     draggingIdRef.current = null
     setDraggingId(null)
   }, [updatePlayerPosition])
@@ -351,6 +499,7 @@ function App() {
     }
 
     pendingPointRef.current = null
+    dragCommitPointRef.current = null
     draggingIdRef.current = null
     setPlayers(initialPlayers)
     setDraggingId(null)
@@ -385,11 +534,8 @@ function App() {
             <CourtSurface isLightMode={isLightMode} />
 
             <TerritoryLayer
-              court={court}
-              players={players}
-              frontSide={frontSide}
-              hitterId={hitterId}
-              isLightMode={isLightMode || isDragging}
+              territoryData={territoryData}
+              isLightMode={territoryIsLightMode}
               showLabels={effectiveShowLabels}
             />
 
@@ -405,6 +551,7 @@ function App() {
                   isHitter={isHitter}
                   showLabels={effectiveShowLabels}
                   onPointerDown={handlePlayerPointerDown}
+                  onElement={setPlayerElement}
                 />
               )
             })}
@@ -428,7 +575,10 @@ function App() {
               <input
                 type="checkbox"
                 checked={isLightMode}
-                onChange={(event) => setIsLightMode(event.currentTarget.checked)}
+                onChange={(event) =>
+                  setIsLightMode(isIpadLike || event.currentTarget.checked)
+                }
+                disabled={isIpadLike}
               />
               <span>軽量モード</span>
             </label>
@@ -444,7 +594,7 @@ function App() {
           </div>
 
           <div className="legend">
-            {legendItems.map((item) => (
+            {visibleLegendItems.map((item) => (
               <div className="legend-row" key={item.name}>
                 <span
                   className={`legend-swatch ${item.id}`}
@@ -502,14 +652,14 @@ function App() {
           </div>
 
           <div className="players-list">
-            {playerOrder.map((id) => (
-              <div className="player-row" key={id}>
+            {playerList.map((player) => (
+              <div className="player-row" key={player.id}>
                 <span
-                  className={`player-dot player-dot-${id.toLowerCase()}`}
+                  className={`player-dot player-dot-${player.id.toLowerCase()}`}
                 >
-                  {id}
+                  {player.id}
                 </span>
-                <span>{initialPlayers[id].role}</span>
+                <span>{player.role}</span>
               </div>
             ))}
           </div>
