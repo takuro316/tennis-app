@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react'
 import { calculateTerritories, toPolygonPoints } from '../utils/territory'
 import type { Court, PlayerInput, TerritoryShape } from '../utils/territory'
 
@@ -11,9 +12,15 @@ type TerritoryLayerProps = {
   }
   frontSide: 'right' | 'left'
   hitterId: 'C' | 'D'
+  isLightMode: boolean
+  showLabels: boolean
 }
 
-function TerritoryPolygon({ shape }: { shape: TerritoryShape }) {
+const TerritoryPolygon = memo(function TerritoryPolygon({
+  shape,
+}: {
+  shape: TerritoryShape
+}) {
   return (
     <polygon
       className={`territory-polygon ${shape.id}`}
@@ -22,23 +29,29 @@ function TerritoryPolygon({ shape }: { shape: TerritoryShape }) {
       opacity={shape.opacity}
     />
   )
-}
+})
 
-export function TerritoryLayer({
+export const TerritoryLayer = memo(function TerritoryLayer({
   court,
   players,
   frontSide,
   hitterId,
+  isLightMode,
+  showLabels,
 }: TerritoryLayerProps) {
-  const territories = calculateTerritories({
-    court,
-    players,
-    hitterId,
-    frontSide,
-  })
+  const territories = useMemo(
+    () =>
+      calculateTerritories({
+        court,
+        players,
+        hitterId,
+        frontSide,
+      }),
+    [court, frontSide, hitterId, players],
+  )
 
   return (
-    <g className="territory-layer">
+    <g className={`territory-layer ${isLightMode ? 'is-light' : ''}`}>
       <TerritoryPolygon shape={territories.shapes.returnable} />
       <TerritoryPolygon shape={territories.shapes.frontTerritory} />
       <TerritoryPolygon shape={territories.shapes.backTerritory} />
@@ -51,16 +64,17 @@ export function TerritoryLayer({
         />
       ))}
 
-      {territories.labels.map((label) => (
-        <text
-          key={label.id}
-          className={`territory-label ${label.id}`}
-          x={label.position.x}
-          y={label.position.y}
-        >
-          {label.text}
-        </text>
-      ))}
+      {showLabels &&
+        territories.labels.map((label) => (
+          <text
+            key={label.id}
+            className={`territory-label ${label.id}`}
+            x={label.position.x}
+            y={label.position.y}
+          >
+            {label.text}
+          </text>
+        ))}
 
       <circle
         className="hitter-origin"
@@ -70,4 +84,4 @@ export function TerritoryLayer({
       />
     </g>
   )
-}
+})

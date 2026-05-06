@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
 import { TerritoryLayer } from './components/TerritoryLayer'
 import type { Court, FrontSide, Point } from './utils/territory'
@@ -64,21 +64,25 @@ const playerOrder: PlayerId[] = ['A', 'B', 'C', 'D']
 const legendItems = [
   {
     name: '返球可能範囲',
+    id: 'returnable',
     color: '#fb923c',
     description: '選択中の打球者Hからこちらのコートへ返球される範囲',
   },
   {
     name: '前衛Bのテリトリー',
+    id: 'front-territory',
     color: '#facc15',
     description: '返球可能範囲を左右2分したB担当側',
   },
   {
     name: '後衛Aのテリトリー',
+    id: 'back-territory',
     color: '#3b82f6',
     description: '返球可能範囲を左右2分したA担当側',
   },
   {
     name: '分担ライン',
+    id: 'split-line',
     color: '#e11d48',
     description: '黄色と青色を分ける返球可能範囲の中央線',
   },
@@ -102,47 +106,256 @@ function getSvgPoint(svg: SVGSVGElement, event: PointerEvent<SVGElement>): Point
   return { x: transformed.x, y: transformed.y }
 }
 
+type CourtSurfaceProps = {
+  isLightMode: boolean
+}
+
+const CourtSurface = memo(function CourtSurface({
+  isLightMode,
+}: CourtSurfaceProps) {
+  return (
+    <>
+      {!isLightMode && (
+        <defs>
+          <pattern
+            id="court-grain"
+            width="20"
+            height="20"
+            patternUnits="userSpaceOnUse"
+          >
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#2d8a63" />
+          </pattern>
+        </defs>
+      )}
+
+      <rect className="canvas-bg" width="760" height="1150" rx="18" />
+      <rect
+        className="court-fill"
+        x={court.x}
+        y={court.y}
+        width={court.width}
+        height={court.height}
+      />
+      {!isLightMode && (
+        <rect
+          className="court-grain"
+          x={court.x}
+          y={court.y}
+          width={court.width}
+          height={court.height}
+          fill="url(#court-grain)"
+        />
+      )}
+
+      <g className="court-lines">
+        <rect
+          x={court.x}
+          y={court.y}
+          width={court.width}
+          height={court.height}
+        />
+        <line
+          x1={court.x}
+          y1={court.centerY}
+          x2={court.x + court.width}
+          y2={court.centerY}
+        />
+        <line
+          x1={court.x}
+          y1={upperServiceLineY}
+          x2={court.x + court.width}
+          y2={upperServiceLineY}
+        />
+        <line
+          x1={court.x}
+          y1={lowerServiceLineY}
+          x2={court.x + court.width}
+          y2={lowerServiceLineY}
+        />
+        <line
+          x1={court.x + court.width / 2}
+          y1={upperServiceLineY}
+          x2={court.x + court.width / 2}
+          y2={court.centerY}
+        />
+        <line
+          x1={court.x + court.width / 2}
+          y1={court.centerY}
+          x2={court.x + court.width / 2}
+          y2={lowerServiceLineY}
+        />
+        <line
+          x1={court.x + 65}
+          y1={court.y}
+          x2={court.x + 65}
+          y2={court.y + court.height}
+        />
+        <line
+          x1={court.x + court.width - 65}
+          y1={court.y}
+          x2={court.x + court.width - 65}
+          y2={court.y + court.height}
+        />
+      </g>
+
+      <g className="net">
+        <line
+          x1={court.x - 18}
+          y1={court.centerY}
+          x2={court.x + court.width + 18}
+          y2={court.centerY}
+        />
+        {!isLightMode && (
+          <text x={court.x + court.width + 34} y={court.centerY + 7}>
+            NET
+          </text>
+        )}
+      </g>
+    </>
+  )
+})
+
+type PlayerMarkerProps = {
+  player: Player
+  isDragging: boolean
+  isHitter: boolean
+  showLabels: boolean
+  onPointerDown: (event: PointerEvent<SVGGElement>, id: PlayerId) => void
+}
+
+const PlayerMarker = memo(function PlayerMarker({
+  player,
+  isDragging,
+  isHitter,
+  showLabels,
+  onPointerDown,
+}: PlayerMarkerProps) {
+  return (
+    <g
+      className={`player ${isDragging ? 'is-dragging' : ''}`}
+      transform={`translate(${player.x} ${player.y})`}
+      onPointerDown={(event) => onPointerDown(event, player.id)}
+    >
+      <circle r="25" fill={player.color} />
+      <circle
+        r={isHitter ? 36 : 31}
+        className={isHitter ? 'player-ring hitter-ring' : 'player-ring'}
+      />
+      <text className="player-id" y="7">
+        {player.id}
+      </text>
+      {showLabels && (
+        <text className="player-role" y="49">
+          {player.role}
+        </text>
+      )}
+    </g>
+  )
+})
+
 function App() {
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const draggingIdRef = useRef<PlayerId | null>(null)
+  const frameRef = useRef<number | null>(null)
+  const pendingPointRef = useRef<Point | null>(null)
   const [players, setPlayers] =
     useState<Record<PlayerId, Player>>(initialPlayers)
   const [draggingId, setDraggingId] = useState<PlayerId | null>(null)
   const [frontSide, setFrontSide] = useState<FrontSide>('right')
   const [hitterId, setHitterId] = useState<HitterId>('D')
+  const [isLightMode, setIsLightMode] = useState(true)
+  const [showLabels, setShowLabels] = useState(false)
+  const isDragging = draggingId !== null
+  const effectiveShowLabels = showLabels && !isLightMode && !isDragging
+  const svgClassName = useMemo(
+    () => `court-svg ${isLightMode ? 'is-light-mode' : ''}`,
+    [isLightMode],
+  )
 
-  function handlePlayerPointerDown(
-    event: PointerEvent<SVGGElement>,
-    id: PlayerId,
-  ) {
-    event.currentTarget.setPointerCapture(event.pointerId)
-    setDraggingId(id)
-  }
+  useEffect(() => {
+    draggingIdRef.current = draggingId
+  }, [draggingId])
 
-  function handlePointerMove(event: PointerEvent<SVGSVGElement>) {
-    if (!draggingId || !svgRef.current) {
+  useEffect(
+    () => () => {
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current)
+      }
+    },
+    [],
+  )
+
+  const updatePlayerPosition = useCallback((position: Point) => {
+    const id = draggingIdRef.current
+
+    if (!id) {
       return
     }
 
-    const position = getSvgPoint(svgRef.current, event)
     setPlayers((current) => ({
       ...current,
-      [draggingId]: {
-        ...current[draggingId],
+      [id]: {
+        ...current[id],
         x: clamp(position.x, 24, 736),
         y: clamp(position.y, 24, 1126),
       },
     }))
-  }
+  }, [])
 
-  function stopDragging() {
+  const handlePlayerPointerDown = useCallback((
+    event: PointerEvent<SVGGElement>,
+    id: PlayerId,
+  ) => {
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    draggingIdRef.current = id
+    setDraggingId(id)
+  }, [])
+
+  const handlePointerMove = useCallback((
+    event: PointerEvent<SVGSVGElement>,
+  ) => {
+    if (!draggingIdRef.current || !svgRef.current) {
+      return
+    }
+
+    event.preventDefault()
+    pendingPointRef.current = getSvgPoint(svgRef.current, event)
+
+    if (frameRef.current === null) {
+      frameRef.current = requestAnimationFrame(() => {
+        if (pendingPointRef.current) {
+          updatePlayerPosition(pendingPointRef.current)
+          pendingPointRef.current = null
+        }
+
+        frameRef.current = null
+      })
+    }
+  }, [updatePlayerPosition])
+
+  const stopDragging = useCallback(() => {
+    if (pendingPointRef.current) {
+      updatePlayerPosition(pendingPointRef.current)
+      pendingPointRef.current = null
+    }
+
+    draggingIdRef.current = null
     setDraggingId(null)
-  }
+  }, [updatePlayerPosition])
 
-  function resetPlayers() {
+  const resetPlayers = useCallback(() => {
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current)
+      frameRef.current = null
+    }
+
+    pendingPointRef.current = null
+    draggingIdRef.current = null
     setPlayers(initialPlayers)
     setDraggingId(null)
     setHitterId('D')
-  }
+  }, [])
 
   return (
     <main className="app-shell">
@@ -160,138 +373,39 @@ function App() {
         <div className="court-panel">
           <svg
             ref={svgRef}
-            className="court-svg"
+            className={svgClassName}
             viewBox="0 0 760 1150"
             role="img"
             aria-label="上から見たテニスコートと選手位置"
             onPointerMove={handlePointerMove}
             onPointerUp={stopDragging}
+            onPointerCancel={stopDragging}
             onPointerLeave={stopDragging}
           >
-            <defs>
-              <pattern
-                id="court-grain"
-                width="20"
-                height="20"
-                patternUnits="userSpaceOnUse"
-              >
-                <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#2d8a63" />
-              </pattern>
-            </defs>
-
-            <rect className="canvas-bg" width="760" height="1150" rx="18" />
-            <rect
-              className="court-fill"
-              x={court.x}
-              y={court.y}
-              width={court.width}
-              height={court.height}
-            />
-            <rect
-              className="court-grain"
-              x={court.x}
-              y={court.y}
-              width={court.width}
-              height={court.height}
-              fill="url(#court-grain)"
-            />
-
-            <g className="court-lines">
-              <rect
-                x={court.x}
-                y={court.y}
-                width={court.width}
-                height={court.height}
-              />
-              <line
-                x1={court.x}
-                y1={court.centerY}
-                x2={court.x + court.width}
-                y2={court.centerY}
-              />
-              <line
-                x1={court.x}
-                y1={upperServiceLineY}
-                x2={court.x + court.width}
-                y2={upperServiceLineY}
-              />
-              <line
-                x1={court.x}
-                y1={lowerServiceLineY}
-                x2={court.x + court.width}
-                y2={lowerServiceLineY}
-              />
-              <line
-                x1={court.x + court.width / 2}
-                y1={upperServiceLineY}
-                x2={court.x + court.width / 2}
-                y2={court.centerY}
-              />
-              <line
-                x1={court.x + court.width / 2}
-                y1={court.centerY}
-                x2={court.x + court.width / 2}
-                y2={lowerServiceLineY}
-              />
-              <line
-                x1={court.x + 65}
-                y1={court.y}
-                x2={court.x + 65}
-                y2={court.y + court.height}
-              />
-              <line
-                x1={court.x + court.width - 65}
-                y1={court.y}
-                x2={court.x + court.width - 65}
-                y2={court.y + court.height}
-              />
-            </g>
-
-            <g className="net">
-              <line
-                x1={court.x - 18}
-                y1={court.centerY}
-                x2={court.x + court.width + 18}
-                y2={court.centerY}
-              />
-              <text x={court.x + court.width + 34} y={court.centerY + 7}>
-                NET
-              </text>
-            </g>
+            <CourtSurface isLightMode={isLightMode} />
 
             <TerritoryLayer
               court={court}
               players={players}
               frontSide={frontSide}
               hitterId={hitterId}
+              isLightMode={isLightMode || isDragging}
+              showLabels={effectiveShowLabels}
             />
 
             {playerOrder.map((id) => {
               const player = players[id]
-              const isDragging = draggingId === id
               const isHitter = hitterId === id
 
               return (
-                <g
+                <PlayerMarker
                   key={player.id}
-                  className={`player ${isDragging ? 'is-dragging' : ''}`}
-                  transform={`translate(${player.x} ${player.y})`}
-                  onPointerDown={(event) =>
-                    handlePlayerPointerDown(event, player.id)
-                  }
-                >
-                  <circle r="25" fill={player.color} />
-                  <circle
-                    r={isHitter ? 36 : 31}
-                    className={isHitter ? 'player-ring hitter-ring' : 'player-ring'}
-                  />
-                  <text className="player-id" y="7">
-                    {player.id}
-                  </text>
-                  <text className="player-role" y="49">
-                    {player.role}
-                  </text>
-                </g>
+                  player={player}
+                  isDragging={draggingId === id}
+                  isHitter={isHitter}
+                  showLabels={effectiveShowLabels}
+                  onPointerDown={handlePlayerPointerDown}
+                />
               )
             })}
           </svg>
@@ -308,12 +422,32 @@ function App() {
             </div>
           </div>
 
+          <div className="side-control">
+            <h2>描画設定</h2>
+            <label className="toggle-control">
+              <input
+                type="checkbox"
+                checked={isLightMode}
+                onChange={(event) => setIsLightMode(event.currentTarget.checked)}
+              />
+              <span>軽量モード</span>
+            </label>
+            <label className="toggle-control">
+              <input
+                type="checkbox"
+                checked={showLabels}
+                onChange={(event) => setShowLabels(event.currentTarget.checked)}
+                disabled={isLightMode}
+              />
+              <span>ラベル表示</span>
+            </label>
+          </div>
+
           <div className="legend">
             {legendItems.map((item) => (
               <div className="legend-row" key={item.name}>
                 <span
-                  className="legend-swatch"
-                  style={{ backgroundColor: item.color }}
+                  className={`legend-swatch ${item.id}`}
                 />
                 <span>
                   <strong>{item.name}</strong>
@@ -371,12 +505,11 @@ function App() {
             {playerOrder.map((id) => (
               <div className="player-row" key={id}>
                 <span
-                  className="player-dot"
-                  style={{ backgroundColor: players[id].color }}
+                  className={`player-dot player-dot-${id.toLowerCase()}`}
                 >
                   {id}
                 </span>
-                <span>{players[id].role}</span>
+                <span>{initialPlayers[id].role}</span>
               </div>
             ))}
           </div>

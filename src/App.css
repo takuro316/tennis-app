@@ -50,7 +50,6 @@ p {
   font: inherit;
   font-weight: 800;
   cursor: pointer;
-  box-shadow: 0 10px 22px rgb(15 81 54 / 20%);
 }
 
 .reset-button:hover {
@@ -76,7 +75,6 @@ p {
   border: 1px solid #d8e5dc;
   border-radius: 8px;
   background: #ffffff;
-  box-shadow: 0 18px 40px rgb(32 55 45 / 12%);
 }
 
 .court-panel {
@@ -90,6 +88,7 @@ p {
   min-height: 620px;
   touch-action: none;
   user-select: none;
+  -webkit-user-select: none;
 }
 
 .canvas-bg {
@@ -161,6 +160,21 @@ p {
   opacity: 0.9;
 }
 
+.territory-layer.is-light .territory-polygon.returnable,
+.territory-layer.is-light .territory-boundary,
+.court-svg.is-light-mode .net line {
+  stroke-dasharray: none;
+}
+
+.territory-layer.is-light .territory-boundary {
+  stroke-linecap: butt;
+  opacity: 0.8;
+}
+
+.territory-layer.is-light .hitter-origin {
+  display: none;
+}
+
 .territory-layer .hitter-origin {
   fill: #111827;
   stroke: #fff;
@@ -192,14 +206,13 @@ p {
 
 .player {
   cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .player.is-dragging {
   cursor: grabbing;
-}
-
-.player circle:first-child {
-  filter: drop-shadow(0 8px 10px rgb(0 0 0 / 25%));
 }
 
 .player-ring {
@@ -303,6 +316,28 @@ p {
   outline-offset: 2px;
 }
 
+.toggle-control {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 10px;
+  color: #17201d;
+  font-size: 14px;
+  font-weight: 800;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.toggle-control input {
+  width: 20px;
+  height: 20px;
+  accent-color: #0f5136;
+}
+
+.toggle-control input:disabled + span {
+  color: #7b8d85;
+}
+
 .range-control {
   display: grid;
   grid-template-columns: 1fr 48px;
@@ -338,6 +373,22 @@ p {
   border-radius: 3px;
 }
 
+.legend-swatch.returnable {
+  background: #fb923c;
+}
+
+.legend-swatch.front-territory {
+  background: #facc15;
+}
+
+.legend-swatch.back-territory {
+  background: #3b82f6;
+}
+
+.legend-swatch.split-line {
+  background: #e11d48;
+}
+
 .legend-row strong,
 .legend-row small {
   display: block;
@@ -363,6 +414,22 @@ p {
   border-radius: 50%;
   color: #fff;
   font-weight: 900;
+}
+
+.player-dot-a {
+  background: #2563eb;
+}
+
+.player-dot-b {
+  background: #facc15;
+}
+
+.player-dot-c {
+  background: #f97316;
+}
+
+.player-dot-d {
+  background: #ef4444;
 }
 
 @media (max-width: 900px) {
