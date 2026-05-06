@@ -7,6 +7,7 @@ import './App.css'
 
 type PlayerId = 'A' | 'B' | 'C' | 'D'
 type HitterId = 'C' | 'D'
+type OperationMode = 'drag' | 'tap'
 
 type Player = Point & {
   id: PlayerId
@@ -251,6 +252,7 @@ type PlayerMarkerProps = {
   player: Player
   isDragging: boolean
   isHitter: boolean
+  isSelected: boolean
   showLabels: boolean
   onPointerDown: (event: PointerEvent<SVGGElement>, id: PlayerId) => void
   onElement: (id: PlayerId, element: SVGGElement | null) => void
@@ -260,6 +262,7 @@ const PlayerMarker = memo(function PlayerMarker({
   player,
   isDragging,
   isHitter,
+  isSelected,
   showLabels,
   onPointerDown,
   onElement,
@@ -272,13 +275,15 @@ const PlayerMarker = memo(function PlayerMarker({
   return (
     <g
       ref={handleElement}
-      className={`player ${isDragging ? 'is-dragging' : ''}`}
+      className={`player ${isDragging ? 'is-dragging' : ''} ${
+        isSelected ? 'is-selected' : ''
+      }`}
       transform={`translate(${player.x} ${player.y})`}
       onPointerDown={(event) => onPointerDown(event, player.id)}
     >
       <circle r="25" fill={player.color} />
       <circle
-        r={isHitter ? 36 : 31}
+        r={isSelected ? 40 : isHitter ? 36 : 31}
         className={isHitter ? 'player-ring hitter-ring' : 'player-ring'}
       />
       <text className="player-id" y="7">
@@ -301,6 +306,7 @@ function arePlayerMarkerPropsEqual(
     previous.player === next.player &&
     previous.isDragging === next.isDragging &&
     previous.isHitter === next.isHitter &&
+    previous.isSelected === next.isSelected &&
     previous.showLabels === next.showLabels &&
     previous.onPointerDown === next.onPointerDown &&
     previous.onElement === next.onElement
@@ -328,7 +334,15 @@ function App() {
   const [hitterId, setHitterId] = useState<HitterId>('D')
   const isIpadLike = useMemo(() => isLikelyIpad(), [])
   const [isLightMode, setIsLightMode] = useState(() => isIpadLike)
+  const [operationMode, setOperationMode] = useState<OperationMode>(() =>
+    isIpadLike ? 'tap' : 'drag',
+  )
+  const [selectedPlayerId, setSelectedPlayerId] = useState<PlayerId | null>(
+    isIpadLike ? 'A' : null,
+  )
   const [showLabels, setShowLabels] = useState(false)
+  const effectiveOperationMode =
+    isLightMode && isIpadLike ? 'tap' : operationMode
   const isDragging = draggingId !== null
   const effectiveShowLabels = showLabels && !isLightMode
   const svgClassName = useMemo(
@@ -343,9 +357,13 @@ function App() {
         classes.push('is-dragging')
       }
 
+      if (effectiveOperationMode === 'tap') {
+        classes.push('is-tap-mode')
+      }
+
       return classes.join(' ')
     },
-    [isDragging, isLightMode],
+    [effectiveOperationMode, isDragging, isLightMode],
   )
   const territoryData = useMemo(
     () =>
@@ -417,6 +435,25 @@ function App() {
     setLivePlayers(nextPlayers)
   }, [])
 
+  const commitPlayerPosition = useCallback((id: PlayerId, position: Point) => {
+    const nextPosition = {
+      x: clamp(position.x, 24, 736),
+      y: clamp(position.y, 24, 1126),
+    }
+    const current = livePlayersRef.current
+    const nextPlayers = {
+      ...current,
+      [id]: {
+        ...current[id],
+        ...nextPosition,
+      },
+    }
+
+    livePlayersRef.current = nextPlayers
+    setLivePlayers(nextPlayers)
+    setCommittedPlayers(nextPlayers)
+  }, [])
+
   const updatePlayerPosition = useCallback((position: Point) => {
     const id = draggingIdRef.current
 
@@ -447,15 +484,37 @@ function App() {
     id: PlayerId,
   ) => {
     event.preventDefault()
+    event.stopPropagation()
+    setSelectedPlayerId(id)
+
+    if (effectiveOperationMode === 'tap') {
+      return
+    }
+
     event.currentTarget.setPointerCapture(event.pointerId)
     draggingIdRef.current = id
     setDraggingId(id)
-  }, [])
+  }, [effectiveOperationMode])
+
+  const handleCourtPointerDown = useCallback((
+    event: PointerEvent<SVGSVGElement>,
+  ) => {
+    if (effectiveOperationMode !== 'tap' || !selectedPlayerId || !svgRef.current) {
+      return
+    }
+
+    event.preventDefault()
+    commitPlayerPosition(selectedPlayerId, getSvgPoint(svgRef.current, event))
+  }, [commitPlayerPosition, effectiveOperationMode, selectedPlayerId])
 
   const handlePointerMove = useCallback((
     event: PointerEvent<SVGSVGElement>,
   ) => {
-    if (!draggingIdRef.current || !svgRef.current) {
+    if (
+      effectiveOperationMode === 'tap' ||
+      !draggingIdRef.current ||
+      !svgRef.current
+    ) {
       return
     }
 
@@ -472,7 +531,7 @@ function App() {
         frameRef.current = null
       })
     }
-  }, [updatePlayerPosition])
+  }, [effectiveOperationMode, updatePlayerPosition])
 
   const stopDragging = useCallback(() => {
     const id = draggingIdRef.current
@@ -503,8 +562,9 @@ function App() {
     setLivePlayers(initialPlayers)
     setCommittedPlayers(initialPlayers)
     setDraggingId(null)
+    setSelectedPlayerId(isIpadLike ? 'A' : null)
     setHitterId('D')
-  }, [])
+  }, [isIpadLike])
 
   return (
     <main className="app-shell">
@@ -526,6 +586,7 @@ function App() {
             viewBox="0 0 760 1150"
             role="img"
             aria-label="上から見たテニスコートと選手位置"
+            onPointerDown={handleCourtPointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={stopDragging}
             onPointerCancel={stopDragging}
@@ -549,6 +610,7 @@ function App() {
                   player={player}
                   isDragging={draggingId === id}
                   isHitter={isHitter}
+                  isSelected={selectedPlayerId === id}
                   showLabels={effectiveShowLabels}
                   onPointerDown={handlePlayerPointerDown}
                   onElement={setPlayerElement}
@@ -591,6 +653,31 @@ function App() {
               />
               <span>ラベル表示</span>
             </label>
+          </div>
+
+          <div className="side-control">
+            <h2>操作モード</h2>
+            <div className="segmented-control" role="group" aria-label="操作モード">
+              <button
+                type="button"
+                className={effectiveOperationMode === 'drag' ? 'is-active' : ''}
+                onClick={() => setOperationMode('drag')}
+                disabled={isIpadLike && isLightMode}
+              >
+                ドラッグ移動
+              </button>
+              <button
+                type="button"
+                className={effectiveOperationMode === 'tap' ? 'is-active' : ''}
+                onClick={() => {
+                  setOperationMode('tap')
+                  setDraggingId(null)
+                  draggingIdRef.current = null
+                }}
+              >
+                タップ移動
+              </button>
+            </div>
           </div>
 
           <div className="legend">
